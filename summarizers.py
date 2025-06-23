@@ -105,15 +105,32 @@ def _get_summary_prompt(transcript, max_length=4000):
 
     return f"""Please summarize ONLY the meditation/rosary content from this Catholic homily, ignoring any repetitive daily introduction.
 
+You will receive a transcript of a Catholic spiritual podcast. Your task is to create a concise summary, faithful to the speaker's words.
+    
 Format requirements:
 * First bullet: If an artwork/painting and artist are mentioned, include that (e.g., "Artwork: The Annunciation by Fra Angelico"). If no artwork mentioned, skip this bullet.
-* Next bullets (up to 8): Key spiritual insights from the meditation (each bullet up to 150 characters). No restrictions on theological terminology. Avoid repeating themes and ideas. 
-* Focus on the main spiritual teachings and practical applications
+• Then give up to 8 bullet points with the main spiritual insights or practical teachings (each ≤150 characters).
+• Use the speaker's wording or faithful paraphrasing. Do not add interpretations or go into theology not mentioned.
+• You may include new ideas only if they help clarify or summarize the speaker's points — no theological digressions.
+• Avoid repeating ideas. Each bullet must be distinct.
+• End with the practical reflection, if the speaker gives one. Place it in italics.
 
 Structure:
 * Start with artwork info (if mentioned)
-* Provide up to 8 bullet points with key insights
-* End with a practical reflection in italics - usually given by speaker
+* Bullets 2–9: Key insights (max 8)
+* Final line: Practical reflection (in italics)
+
+Output Example:
+Artwork: The Annunciation by Fra Angelico
+– God often speaks in silence and stillness
+– Mary's “yes” came from humility and trust
+– Obedience opens the door to grace
+– Silence is a posture of receptivity
+– Faith means saying yes without full clarity
+– God initiates; we respond
+– Grace builds on openness, not control
+– Mary shows the power of quiet surrender
+Spend time in silence today, listening for God's invitation
 
 MEDITATION CONTENT:
 {meditation_content}"""

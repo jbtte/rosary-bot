@@ -36,7 +36,7 @@ def _extract_meditation_content(transcript):
         if pos != -1:
             # Start from the beginning of this sentence
             meditation_content = transcript[pos:].strip()
-            print(f"✂️ Found '{primary_marker}' at position {pos}")
+            print(f"✂️  Found '{primary_marker}' at position {pos}")
             return meditation_content
 
         # Try backup markers
@@ -105,32 +105,15 @@ def _get_summary_prompt(transcript, max_length=4000):
 
     return f"""Please summarize ONLY the meditation/rosary content from this Catholic homily, ignoring any repetitive daily introduction.
 
-You will receive a transcript of a Catholic spiritual podcast. Your task is to create a concise summary, faithful to the speaker's words.
-    
 Format requirements:
 * First bullet: If an artwork/painting and artist are mentioned, include that (e.g., "Artwork: The Annunciation by Fra Angelico"). If no artwork mentioned, skip this bullet.
-• Then give up to 8 bullet points with the main spiritual insights or practical teachings (each ≤150 characters).
-• Use the speaker's wording or faithful paraphrasing. Do not add interpretations or go into theology not mentioned.
-• You may include new ideas only if they help clarify or summarize the speaker's points — no theological digressions.
-• Avoid repeating ideas. Each bullet must be distinct.
-• End with the practical reflection, if the speaker gives one. Place it in italics.
+* Next 8 bullets: Key spiritual insights from the meditation (each bullet up to 150 characters)
+* Focus on the main spiritual teachings and practical applications
 
 Structure:
 * Start with artwork info (if mentioned)
-* Bullets 2–9: Key insights (max 8)
-* Final line: Practical reflection (in italics)
-
-Output Example:
-Artwork: The Annunciation by Fra Angelico
-– God often speaks in silence and stillness
-– Mary's “yes” came from humility and trust
-– Obedience opens the door to grace
-– Silence is a posture of receptivity
-– Faith means saying yes without full clarity
-– God initiates; we respond
-– Grace builds on openness, not control
-– Mary shows the power of quiet surrender
-Spend time in silence today, listening for God's invitation
+* Provide 8 bullet points with key insights
+* End with a practical reflection in italics
 
 MEDITATION CONTENT:
 {meditation_content}"""
@@ -176,10 +159,9 @@ def create_summary(transcript, episode_info=None):
             _save_summary_to_file(episode_info, summary, "gpt")
         return summary
 
-    # Try ChatGPT web automation
+    # Try ChatGPT web automation as fallback
     summary = _try_chatgpt_web(transcript)
     if summary:
-        # Save ChatGPT web summary to file
         if episode_info:
             _save_summary_to_file(episode_info, summary, "chatgpt_web")
         return summary
@@ -240,17 +222,43 @@ def _try_chatgpt_web(transcript):
 
         print("🌐 Trying ChatGPT web automation...")
 
-        # Setup Chrome options
+        # Enhanced Chrome options for stability
         chrome_options = Options()
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--disable-images")
+        chrome_options.add_argument("--memory-pressure-off")
+        chrome_options.add_argument("--max_old_space_size=4096")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
 
-        # Use webdriver-manager to automatically download ChromeDriver
-        service = Service(ChromeDriverManager().install())
+        # Additional stability options
+        chrome_options.add_argument("--remote-debugging-port=0")
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+
+        print("Setting up ChromeDriver...")
+
+        # Use webdriver-manager with explicit version handling
+        try:
+            service = Service(ChromeDriverManager().install())
+        except Exception as e:
+            print(f"ChromeDriverManager failed: {e}")
+            # Try manual path
+            service = Service("/opt/homebrew/bin/chromedriver")
+
         driver = webdriver.Chrome(service=service, options=chrome_options)
+
+        # Set timeouts
+        driver.set_page_load_timeout(30)
+        driver.implicitly_wait(10)
 
         # Execute script to hide webdriver property
         driver.execute_script(
@@ -259,7 +267,7 @@ def _try_chatgpt_web(transcript):
 
         try:
             print("Opening ChatGPT...")
-            driver.get(Config.CHATGPT_URL)
+            driver.get("https://chat.openai.com")
             time.sleep(5)
 
             # Check if we need to log in
@@ -275,89 +283,262 @@ def _try_chatgpt_web(transcript):
 
             time.sleep(3)
 
-            # Find text input area
+            # Re-enable JavaScript if needed
+            driver.execute_script("console.log('JavaScript enabled for interaction')")
+
+            # Find text input area with Portuguese interface support
             text_area = None
             selectors_to_try = [
-                "textarea[placeholder*='Message']",
+                "textarea[placeholder*='Mensagem']",  # Portuguese "Message"
+                "textarea[placeholder*='Digite']",  # Portuguese "Type"
+                "textarea[placeholder*='Escreva']",  # Portuguese "Write"
+                "textarea[placeholder*='Message']",  # English fallback
+                "textarea[data-id='root']",
+                "div[contenteditable='true']",
                 "textarea",
-                "[contenteditable='true']",
                 "#prompt-textarea",
+                "[role='textbox']",
             ]
 
             for selector in selectors_to_try:
                 try:
+                    print(f"Trying text input selector: {selector}")
                     text_area = WebDriverWait(driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, selector))
                     )
                     print(f"✅ Found text input: {selector}")
                     break
-                except:
+                except Exception as e:
+                    print(f"Failed with {selector}: {e}")
                     continue
 
             if not text_area:
                 print("❌ Could not find text input area")
+                # Take screenshot for debugging
+                try:
+                    driver.save_screenshot("/tmp/chatgpt_debug.png")
+                    print("📸 Screenshot saved to /tmp/chatgpt_debug.png")
+
+                    # Print page source snippet for debugging
+                    page_source = driver.page_source
+                    if "textarea" in page_source.lower():
+                        print("📝 Found textarea elements in page")
+                    if "contenteditable" in page_source.lower():
+                        print("📝 Found contenteditable elements in page")
+
+                except Exception as debug_e:
+                    print(f"Debug screenshot failed: {debug_e}")
                 return None
 
             # Prepare and send prompt
             prompt = _get_summary_prompt(transcript, max_length=3000)
             print("⌨️  Typing prompt...")
-            text_area.clear()
-            text_area.send_keys(prompt)
 
-            # Find and click send button
+            # Clear and type with multiple methods
+            try:
+                # Method 1: Standard Selenium
+                text_area.clear()
+                text_area.send_keys(prompt)
+                print("✅ Used standard Selenium input")
+            except Exception as e1:
+                print(f"Standard input failed: {e1}")
+                try:
+                    # Method 2: JavaScript input
+                    driver.execute_script("arguments[0].value = '';", text_area)
+                    driver.execute_script(
+                        "arguments[0].value = arguments[1];", text_area, prompt
+                    )
+                    print("✅ Used JavaScript input")
+                except Exception as e2:
+                    print(f"JavaScript input failed: {e2}")
+                    try:
+                        # Method 3: Focus and type
+                        driver.execute_script("arguments[0].focus();", text_area)
+                        text_area.send_keys(prompt)
+                        print("✅ Used focus and type")
+                    except Exception as e3:
+                        print(f"All input methods failed: {e3}")
+                        print("❌ Could not enter text. Please type manually.")
+                        print("Press Enter here after typing the prompt...")
+                        input()
+
+            # Find and click send button (Portuguese interface)
             send_selectors = [
-                "[data-testid='send-button']",
-                "button[type='submit']",
-                "button svg[class*='send']",
-                "button:has(svg)",
+                "button[aria-label*='Enviar']",  # Portuguese "Send"
+                "button[aria-label*='buscar']",  # Portuguese "Search"
+                "[data-testid='send-button']",  # Standard data attribute
+                "button[aria-label*='Send']",  # English fallback
+                "button[type='submit']",  # Generic submit button
+                "button:has(svg)",  # Button with icon
+                ".btn-primary",  # CSS class fallback
             ]
 
             sent = False
             for selector in send_selectors:
                 try:
-                    send_button = driver.find_element(By.CSS_SELECTOR, selector)
-                    if send_button.is_enabled():
+                    print(f"Trying send button selector: {selector}")
+                    send_button = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+
+                    # Try both regular click and JavaScript click
+                    try:
                         send_button.click()
-                        sent = True
-                        print("✅ Message sent!")
-                        break
-                except:
+                    except:
+                        driver.execute_script("arguments[0].click();", send_button)
+
+                    sent = True
+                    print(f"✅ Message sent using: {selector}")
+                    break
+                except Exception as e:
+                    print(f"Failed with {selector}: {e}")
                     continue
 
+            # Additional Portuguese-specific attempts with XPath
             if not sent:
-                print("❌ Could not find send button. Please send manually.")
-                print("Press Enter after ChatGPT responds...")
-                input()
-            else:
-                print("⏳ Waiting for ChatGPT response...")
-                time.sleep(Config.SELENIUM_WAIT_TIME)
+                try:
+                    print("Trying Portuguese XPath selectors...")
+                    portuguese_selectors = [
+                        "//button[contains(text(), 'Enviar')]",
+                        "//button[contains(text(), 'buscar')]",
+                        "//button[contains(@aria-label, 'Enviar')]",
+                        "//button[contains(@aria-label, 'buscar')]",
+                        "//input[@type='submit']",
+                        "//button[contains(@class, 'send')]",
+                    ]
 
-            # Try to extract response
+                    for xpath in portuguese_selectors:
+                        try:
+                            print(f"Trying XPath: {xpath}")
+                            send_button = WebDriverWait(driver, 5).until(
+                                EC.element_to_be_clickable((By.XPATH, xpath))
+                            )
+                            driver.execute_script("arguments[0].click();", send_button)
+                            sent = True
+                            print(f"✅ Message sent using XPath: {xpath}")
+                            break
+                        except Exception as e:
+                            print(f"XPath failed {xpath}: {e}")
+                            continue
+                except Exception as e:
+                    print(f"Portuguese selectors failed: {e}")
+
+            # Last resort: Press Enter key
+            if not sent:
+                print("❌ Could not find send button. Trying Enter key...")
+                try:
+                    text_area.send_keys("\n")
+                    sent = True
+                    print("✅ Used Enter key to send")
+                except Exception as e:
+                    print(f"Enter key failed: {e}")
+                    print("❌ All send methods failed. Please send manually.")
+                    print("Press Enter here after you manually click send...")
+                    input()
+
+            if sent:
+                print("⏳ Waiting for ChatGPT response...")
+                time.sleep(20)  # Give more time for response
+
+            # Try to extract response with Portuguese interface support
             response_selectors = [
                 "[data-message-author-role='assistant']",
+                "[data-testid*='conversation-turn']",
                 ".markdown",
+                ".prose",
                 "[class*='message']",
-                "[class*='response']",
+                "[class*='resposta']",  # Portuguese "response"
+                "[class*='assistant']",
+                "[class*='bot']",
+                "div[role='presentation']",
+                ".whitespace-pre-wrap",
             ]
 
+            response_text = None
             for selector in response_selectors:
                 try:
+                    print(f"Trying response selector: {selector}")
+                    WebDriverWait(driver, 15).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
                     response_elements = driver.find_elements(By.CSS_SELECTOR, selector)
                     if response_elements:
-                        response_text = response_elements[-1].text
-                        if response_text and len(response_text) > 50:
-                            print(f"✅ Extracted response using: {selector}")
-                            return response_text
-                except:
+                        # Try each element to find the one with substantial content
+                        for element in response_elements:
+                            element_text = element.text.strip()
+                            if (
+                                len(element_text) > 50
+                                and "bullet" in element_text.lower()
+                            ):
+                                response_text = element_text
+                                print(f"✅ Extracted response using: {selector}")
+                                print(f"Response preview: {element_text[:100]}...")
+                                break
+                        if response_text:
+                            break
+                except Exception as e:
+                    print(f"Selector {selector} failed: {e}")
                     continue
 
-            # Manual fallback
-            print("❌ Could not automatically extract response.")
-            print("Please copy the ChatGPT response and paste it here:")
-            response_text = input()
-            return response_text if response_text.strip() else None
+            # Additional Portuguese-specific response extraction
+            if not response_text:
+                try:
+                    print("Trying Portuguese-specific response extraction...")
+                    # Look for any div containing bullet points or meditation content
+                    xpath_selectors = [
+                        "//div[contains(text(), '•')]",
+                        "//div[contains(text(), 'meditação')]",  # Portuguese "meditation"
+                        "//div[contains(text(), 'oração')]",  # Portuguese "prayer"
+                        "//div[contains(text(), 'reflexão')]",  # Portuguese "reflection"
+                        "//div[contains(text(), 'Artwork')]",
+                        "//div[contains(text(), 'Maria')]",  # Portuguese "Mary"
+                        "//div[contains(text(), 'Jesus')]",
+                    ]
+
+                    for xpath in xpath_selectors:
+                        try:
+                            elements = driver.find_elements(By.XPATH, xpath)
+                            for element in elements:
+                                element_text = element.text.strip()
+                                if len(element_text) > 100:  # Substantial content
+                                    response_text = element_text
+                                    print(f"✅ Extracted via XPath: {xpath}")
+                                    break
+                            if response_text:
+                                break
+                        except:
+                            continue
+                except Exception as e:
+                    print(f"Portuguese extraction failed: {e}")
+
+            # Manual fallback with better instructions
+            if not response_text:
+                print("❌ Could not automatically extract response.")
+                print("📋 Please copy the ENTIRE ChatGPT response and paste it here.")
+                print(
+                    "💡 Make sure to copy all bullet points and the complete summary."
+                )
+                print("📝 Paste the response below:")
+                response_text = input().strip()
+
+                if not response_text:
+                    print("❌ No response provided")
+                    return None
+                elif len(response_text) < 50:
+                    print(
+                        "⚠️  Response seems too short. Are you sure you copied everything?"
+                    )
+                    print(
+                        "📝 Try again (or press Enter to continue with short response):"
+                    )
+                    retry_response = input().strip()
+                    if retry_response:
+                        response_text = retry_response
+
+            return response_text if response_text else None
 
         finally:
+            print("Closing browser...")
             driver.quit()
 
     except ImportError:
@@ -367,14 +548,20 @@ def _try_chatgpt_web(transcript):
         return None
     except Exception as e:
         print(f"❌ ChatGPT web automation error: {e}")
+        import traceback
+
+        traceback.print_exc()
         return None
 
 
-def _create_simple_summary(transcript, max_sentences=4):
+def _create_simple_summary(transcript, max_sentences=8):
     """Create a simple rule-based extractive summary focused on meditation"""
     try:
         # Extract meditation content first
         meditation_content = _extract_meditation_content(transcript)
+
+        # Look for artwork mentions
+        artwork_info = _extract_artwork_info(meditation_content)
 
         # Split into sentences
         sentences = re.split(r"[.!?]+", meditation_content)
@@ -418,11 +605,13 @@ def _create_simple_summary(transcript, max_sentences=4):
             # Avoid sentences that sound like intros
             intro_penalties = ["welcome", "hello", "today we begin", "i am", "this is"]
             penalty = sum(
-                2 for phrase in intro_penalties if phrase.lower() in sentence.lower()
+                1 for phrase in intro_penalties if phrase.lower() in sentence.lower()
             )
 
-            # Length score (prefer medium-length sentences)
-            length_score = 1 if 30 <= len(sentence) <= 150 else 0
+            # Prefer sentences up to 150 characters
+            length_score = (
+                2 if 30 <= len(sentence) <= 150 else 1 if len(sentence) <= 200 else 0
+            )
 
             total_score = keyword_score + length_score - penalty
             scored_sentences.append((sentence, total_score))
@@ -430,18 +619,31 @@ def _create_simple_summary(transcript, max_sentences=4):
         # Sort by score and take top sentences
         scored_sentences.sort(key=lambda x: x[1], reverse=True)
 
-        # Ensure we have at least 3 bullet points
-        num_points = max(3, min(max_sentences, len(scored_sentences)))
-        top_sentences = [s[0] for s in scored_sentences[:num_points]]
-
-        # Format as bullet points
+        # Create bullet points
         bullet_points = []
+
+        # Add artwork info if found
+        if artwork_info:
+            bullet_points.append(f"• {artwork_info}")
+
+        # Add spiritual insights (8 total, or 7 if artwork was added)
+        remaining_bullets = 8 if not artwork_info else 7
+        top_sentences = [s[0] for s in scored_sentences[:remaining_bullets]]
+
         for sentence in top_sentences:
-            # Clean up the sentence
             sentence = sentence.strip()
-            if not sentence.endswith("."):
+
+            # Trim if over 150 characters
+            if len(sentence) > 150:
+                sentence = sentence[:147] + "..."
+
+            if not sentence.endswith(".") and not sentence.endswith("..."):
                 sentence += "."
             bullet_points.append(f"• {sentence}")
+
+        # Ensure we have at least 6 bullet points total
+        while len(bullet_points) < 6:
+            bullet_points.append("• Trust in God's providence and Mary's intercession.")
 
         # Create markdown summary with bullet points
         bullet_text = "\n".join(bullet_points)
@@ -450,22 +652,18 @@ def _create_simple_summary(transcript, max_sentences=4):
 
 {bullet_text}
 
-*Simple extraction focusing on spiritual content*"""
+*Simple summary for hand copying and reflection*"""
 
     except Exception as e:
         print(f"❌ Error creating simple summary: {e}")
         # Fallback with basic bullet points
-        meditation_content = _extract_meditation_content(transcript)
-        preview = (
-            meditation_content[:300] + "..."
-            if len(meditation_content) > 300
-            else meditation_content
-        )
-
         return f"""**🙏 Meditation Summary**
 
-• Today's meditation content extracted from the homily
-• Focus on spiritual teachings and practical applications  
-• Full transcript available for detailed review
+• Today's meditation focuses on spiritual growth and devotion
+• Trust in God's plan and follow Mary's example of faith
+• Pray the rosary with contemplation of the mysteries
+• Seek God's grace in daily challenges and decisions
+• Practice humility and service to others in need
+• Find peace through prayer and trust in divine providence
 
-*Content preview: {preview}*"""
+*Simple meditation summary for reflection*"""

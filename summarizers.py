@@ -7,7 +7,7 @@ from openai import OpenAI
 from config import Config
 
 # Initialize OpenAI client
-client = OpenAI(api_key=Config.OPENAI_API_KEY)
+# client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
 
 def _extract_meditation_content(transcript):

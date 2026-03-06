@@ -20,9 +20,23 @@ def main():
     """Main execution flow"""
     print("🔮 Rosary Bot Starting...")
 
-    # Step 1: Get latest episode info
-    print("\n📡 Fetching latest episode...")
-    episode_info = get_latest_episode()
+    episode_number = None
+    # Check if an episode number is provided as a command-line argument
+    if len(sys.argv) > 1:
+        try:
+            episode_number = int(sys.argv[1])
+            print(f"\n📡 Fetching episode number: {episode_number}...")
+        except ValueError:
+            print(
+                f"⚠️ Invalid episode number provided: '{sys.argv[1]}'. Falling back to latest episode."
+            )
+            episode_number = None
+    else:
+        print("\n📡 Fetching latest episode...")
+
+    # Step 1: Get episode info
+    # Pass the episode_number if it's set, otherwise get_latest_episode will fetch the latest
+    episode_info = get_latest_episode(episode_number=episode_number)
     if not episode_info:
         print("❌ No episode found.")
         return False
@@ -45,18 +59,23 @@ def main():
     save_transcript(episode_info, transcript)
 
     # Step 5: Create summary
-    print("\n📝 Creating summary...")
-    summary = create_summary(transcript, episode_info)
-    if not summary:
-        print("❌ Failed to create summary.")
-        return False
+    ## Não rodando o resumo por enquanto ##
+    # print("\n📝 Creating summary...")
+    # summary = create_summary(transcript, episode_info)
+    # if not summary:
+    #     print("❌ Failed to create summary.")
+    #     return False
 
     # Step 6: Send to Telegram
-    print("\n📱 Sending to Telegram...")
-    success = send_summary(episode_info, summary)
+    ## Como está sem resumo, não envia ##
+    # print("\n📱 Sending to Telegram...")
+    # success = send_summary(episode_info, summary)
+
+    success = True  # Simulate success for now
 
     if success:
-        print("✅ Summary sent successfully to Telegram!")
+        # Não rodando o envio por enquanto
+        # print("✅ Summary sent successfully to Telegram!")
 
         # Step 7: Cleanup files after successful completion
         print("\n🧹 Cleaning up files...")
